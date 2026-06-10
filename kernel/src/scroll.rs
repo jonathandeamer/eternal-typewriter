@@ -17,7 +17,7 @@ impl Scroll {
     /// Valid records form a contiguous prefix from LBA 0 (zeroed-disk
     /// precondition + LBA check), which is what makes the search sound.
     pub fn load(columns: usize) -> Result<Scroll, AtaError> {
-        let total_sectors = ata::identify().ok_or(AtaError)?;
+        let total_sectors = u32::try_from(ata::identify().ok_or(AtaError)?).map_err(|_| AtaError)? as u64;
         let mut sector = [0u8; SECTOR_SIZE];
 
         let mut lo: u64 = 0;
@@ -95,8 +95,10 @@ impl Scroll {
         }
         // Rewrite the (same) tail sector in place — the only overwrite that
         // ever happens.
-        let sector = record::encode(self.sealed, &self.tail);
-        self.write(self.sealed, &sector);
+        if !self.tail.is_empty() {
+            let sector = record::encode(self.sealed, &self.tail);
+            self.write(self.sealed, &sector);
+        }
     }
 
     fn write(&mut self, lba: u64, sector: &[u8; SECTOR_SIZE]) {

@@ -61,7 +61,7 @@ pub fn init() {
 }
 
 /// Fixed ring so the IRQ handler never allocates. 64 pending scancodes is
-/// far beyond human typing speed; overflow drops the oldest-unread input.
+/// far beyond human typing speed; overflow drops the newest input.
 struct Ring {
     buf: [u8; 64],
     head: usize,
