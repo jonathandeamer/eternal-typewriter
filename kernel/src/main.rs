@@ -84,7 +84,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     );
     let mut cursor_on = true;
     let mut last_toggle = 0u64;
-    render(&mut renderer, &scroll.text, &scroll.layout, cursor_on);
+    let mut view_offset: usize = 0;
+    render(&mut renderer, &scroll.text, &scroll.layout, cursor_on, view_offset);
 
     loop {
         let mut dirty = false;
@@ -92,10 +93,33 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             serial_println!("sc {:#x}", scancode);
             if let Ok(Some(event)) = decoder.add_byte(scancode) {
                 if let Some(key) = decoder.process_keyevent(event) {
-                    if let Some(ch) = inkable(key) {
-                        scroll.append_char(ch);
-                        serial_println!("ink {:?} -> {} bytes", ch, scroll.text.len());
-                        dirty = true;
+                    match key {
+                        pc_keyboard::DecodedKey::RawKey(pc_keyboard::KeyCode::PageUp) => {
+                            let page = renderer.rows.saturating_sub(1);
+                            let max = scroll.layout.lines().len().saturating_sub(renderer.rows);
+                            let new_offset = view_offset.saturating_add(page).min(max);
+                            if new_offset != view_offset {
+                                view_offset = new_offset;
+                                dirty = true;
+                            }
+                        }
+                        pc_keyboard::DecodedKey::RawKey(pc_keyboard::KeyCode::PageDown) => {
+                            let new_offset = view_offset.saturating_sub(renderer.rows.saturating_sub(1));
+                            if new_offset != view_offset {
+                                view_offset = new_offset;
+                                dirty = true;
+                            }
+                        }
+                        other => {
+                            if let Some(ch) = inkable(other) {
+                                // Spec: a printable key snaps back to the live
+                                // end AND inks there — even mid-reading.
+                                view_offset = 0;
+                                scroll.append_char(ch);
+                                serial_println!("ink {:?} -> {} bytes", ch, scroll.text.len());
+                                dirty = true;
+                            }
+                        }
                     }
                 }
             }
@@ -104,10 +128,12 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         if ticks.wrapping_sub(last_toggle) >= 9 {
             cursor_on = !cursor_on;
             last_toggle = ticks;
-            dirty = true;
+            if view_offset == 0 {
+                dirty = true;
+            }
         }
         if dirty {
-            render(&mut renderer, &scroll.text, &scroll.layout, cursor_on);
+            render(&mut renderer, &scroll.text, &scroll.layout, cursor_on, view_offset);
         }
         x86_64::instructions::hlt();
     }
@@ -132,18 +158,24 @@ fn render(
     text: &str,
     layout: &scroll_core::layout::Layout,
     cursor_on: bool,
+    view_offset: usize,
 ) {
     renderer.fill(framebuffer::PAPER);
     let lines = layout.lines();
-    let first = lines.len().saturating_sub(renderer.rows);
-    for (row, line) in lines[first..].iter().enumerate() {
+    let end = lines.len().saturating_sub(view_offset);
+    let first = end.saturating_sub(renderer.rows);
+    for (row, line) in lines[first..end].iter().enumerate() {
         let color = if line.is_separator { framebuffer::DIM } else { framebuffer::INK };
         for (col, ch) in text[line.start..line.end].chars().enumerate() {
             renderer.draw_char(row, col, ch, color);
         }
     }
-    let (cursor_line, cursor_col) = layout.cursor();
-    renderer.draw_cursor(cursor_line - first, cursor_col, cursor_on);
+    if view_offset == 0 {
+        let (cursor_line, cursor_col) = layout.cursor();
+        if cursor_line >= first {
+            renderer.draw_cursor(cursor_line - first, cursor_col, cursor_on);
+        }
+    } // reading mode: no cursor — you can look, you can't touch
 }
 
 #[panic_handler]
