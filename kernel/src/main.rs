@@ -1,7 +1,11 @@
 #![no_std]
 #![no_main]
+#![feature(abi_x86_interrupt)]
 
 mod framebuffer;
+mod gdt;
+mod interrupts;
+mod keyboard;
 mod serial;
 
 use bootloader_api::{
@@ -30,8 +34,18 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     for (col, ch) in "the eternal typewriter".chars().enumerate() {
         renderer.draw_char(0, col, ch, framebuffer::INK);
     }
-    renderer.draw_cursor(1, 0, true);
+    interrupts::init();
+    let mut cursor_on = true;
+    let mut last_toggle = 0u64;
+    renderer.draw_cursor(1, 0, cursor_on);
     loop {
+        let ticks = interrupts::TICKS.load(core::sync::atomic::Ordering::Relaxed);
+        if ticks.wrapping_sub(last_toggle) >= 9 {
+            // 9 ticks at 18.2 Hz ≈ a half-second blink phase
+            cursor_on = !cursor_on;
+            last_toggle = ticks;
+            renderer.draw_cursor(1, 0, cursor_on);
+        }
         x86_64::instructions::hlt();
     }
 }
