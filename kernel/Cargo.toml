@@ -8,4 +8,12 @@ bootloader_api = "0.11"
 x86_64 = "0.15"
 spin = "0.9"
 uart_16550 = "0.3"
+# 0.3.x has no unicode-general-punctuation range, so the em dash (U+2014)
+# falls back to '-' on screen via draw_char; the real bytes still persist.
+noto-sans-mono-bitmap = { version = "0.3", default-features = false, features = [
+    "bold",
+    "size_24",
+    "unicode-basic-latin",
+    "unicode-latin-1-supplement",
+] }
 scroll-core = { path = "../scroll-core" }

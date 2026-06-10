@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
 
+mod framebuffer;
 mod serial;
 
 use bootloader_api::{
@@ -24,9 +25,12 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     let fb = boot_info.framebuffer.as_mut().expect("no framebuffer");
     let info = fb.info();
     serial_println!("framebuffer {}x{} {:?}", info.width, info.height, info.pixel_format);
-    for byte in fb.buffer_mut() {
-        *byte = 0xE8; // rough light grey in any pixel format — proves we own the screen
+    let mut renderer = framebuffer::Renderer::new(fb);
+    serial_println!("grid {}x{}", renderer.columns, renderer.rows);
+    for (col, ch) in "the eternal typewriter".chars().enumerate() {
+        renderer.draw_char(0, col, ch, framebuffer::INK);
     }
+    renderer.draw_cursor(1, 0, true);
     loop {
         x86_64::instructions::hlt();
     }
