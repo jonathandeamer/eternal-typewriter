@@ -2,10 +2,14 @@
 #![no_main]
 #![feature(abi_x86_interrupt)]
 
+extern crate alloc;
+
+mod allocator;
 mod framebuffer;
 mod gdt;
 mod interrupts;
 mod keyboard;
+mod memory;
 mod serial;
 
 use bootloader_api::{
@@ -13,6 +17,7 @@ use bootloader_api::{
     entry_point, BootInfo,
 };
 use core::panic::PanicInfo;
+use x86_64::VirtAddr;
 
 pub static BOOTLOADER_CONFIG: BootloaderConfig = {
     let mut config = BootloaderConfig::new_default();
@@ -26,6 +31,20 @@ entry_point!(kernel_main, config = &BOOTLOADER_CONFIG);
 
 fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     serial_println!("eternal typewriter: boot");
+    let physical_memory_offset = VirtAddr::new(
+        boot_info.physical_memory_offset.into_option().expect("no physical memory mapping"),
+    );
+    let mut mapper = unsafe { memory::init(physical_memory_offset) };
+    let mut frame_allocator =
+        unsafe { memory::BootInfoFrameAllocator::init(&boot_info.memory_regions) };
+    allocator::init_heap(&mut mapper, &mut frame_allocator).expect("heap init failed");
+    {
+        let mut probe = alloc::vec::Vec::new();
+        for i in 0..100_000u64 {
+            probe.push(i);
+        }
+        serial_println!("heap ok: vec of {} elements", probe.len());
+    }
     let fb = boot_info.framebuffer.as_mut().expect("no framebuffer");
     let info = fb.info();
     serial_println!("framebuffer {}x{} {:?}", info.width, info.height, info.pixel_format);
