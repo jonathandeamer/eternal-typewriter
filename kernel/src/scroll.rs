@@ -1,7 +1,12 @@
 use crate::ata::{self, AtaError};
 use alloc::{string::String, vec::Vec};
+use core::sync::atomic::{AtomicBool, Ordering};
 use scroll_core::layout::Layout;
 use scroll_core::record::{self, PAYLOAD_CAPACITY, SECTOR_SIZE};
+
+/// Set when a sector write keeps failing; the main loop renders a red `!`
+/// in the margin. Never cleared — distrust, once earned, is permanent.
+pub static WRITE_TROUBLE: AtomicBool = AtomicBool::new(false);
 
 pub struct Scroll {
     pub text: String,
@@ -102,7 +107,14 @@ impl Scroll {
     }
 
     fn write(&mut self, lba: u64, sector: &[u8; SECTOR_SIZE]) {
-        // Retry-with-warning lands in Task 14; for now fail loudly.
-        ata::write_sector(lba as u32, sector).expect("scroll write failed");
+        if WRITE_TROUBLE.load(Ordering::Relaxed) {
+            return;
+        }
+        for _attempt in 0..3 {
+            if ata::write_sector(lba as u32, sector).is_ok() {
+                return;
+            }
+        }
+        WRITE_TROUBLE.store(true, Ordering::Relaxed);
     }
 }

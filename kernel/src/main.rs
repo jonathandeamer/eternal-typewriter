@@ -85,7 +85,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     let mut cursor_on = true;
     let mut last_toggle = 0u64;
     let mut view_offset: usize = 0;
-    render(&mut renderer, &scroll.text, &scroll.layout, cursor_on, view_offset);
+    render(&mut renderer, &scroll.text, &scroll.layout, cursor_on, view_offset, scroll.full);
 
     loop {
         let mut dirty = false;
@@ -128,12 +128,12 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         if ticks.wrapping_sub(last_toggle) >= 9 {
             cursor_on = !cursor_on;
             last_toggle = ticks;
-            if view_offset == 0 {
+            if view_offset == 0 && !scroll.full {
                 dirty = true;
             }
         }
         if dirty {
-            render(&mut renderer, &scroll.text, &scroll.layout, cursor_on, view_offset);
+            render(&mut renderer, &scroll.text, &scroll.layout, cursor_on, view_offset, scroll.full);
         }
         x86_64::instructions::hlt();
     }
@@ -159,23 +159,37 @@ fn render(
     layout: &scroll_core::layout::Layout,
     cursor_on: bool,
     view_offset: usize,
+    full: bool,
 ) {
     renderer.fill(framebuffer::PAPER);
     let lines = layout.lines();
     let end = lines.len().saturating_sub(view_offset);
-    let first = end.saturating_sub(renderer.rows);
+    let max_text_rows = if full { renderer.rows.saturating_sub(1) } else { renderer.rows };
+    let first = end.saturating_sub(max_text_rows);
     for (row, line) in lines[first..end].iter().enumerate() {
         let color = if line.is_separator { framebuffer::DIM } else { framebuffer::INK };
         for (col, ch) in text[line.start..line.end].chars().enumerate() {
             renderer.draw_char(row, col, ch, color);
         }
     }
-    if view_offset == 0 {
+    if view_offset == 0 && !full {
         let (cursor_line, cursor_col) = layout.cursor();
         if cursor_line >= first {
             renderer.draw_cursor(cursor_line - first, cursor_col, cursor_on);
         }
-    } // reading mode: no cursor — you can look, you can't touch
+    } // reading mode or full scroll: no cursor
+    if full {
+        // The dignified end: rendered, never written — there is nowhere
+        // left to write it.
+        let message = "\u{2014} the scroll is full. the typewriter rests. \u{2014}";
+        let row = renderer.rows - 1;
+        for (col, ch) in message.chars().enumerate() {
+            renderer.draw_char(row, col, ch, framebuffer::DIM);
+        }
+    }
+    if scroll::WRITE_TROUBLE.load(core::sync::atomic::Ordering::Relaxed) {
+        renderer.draw_warning_glyph();
+    }
 }
 
 #[panic_handler]
