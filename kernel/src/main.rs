@@ -11,6 +11,7 @@ mod gdt;
 mod interrupts;
 mod keyboard;
 mod memory;
+mod scroll;
 mod serial;
 
 use bootloader_api::{
@@ -53,8 +54,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     serial_println!("grid {}x{}", renderer.columns, renderer.rows);
     interrupts::init();
 
-    let mut text = alloc::string::String::new();
-    let mut layout = scroll_core::layout::Layout::new(renderer.columns);
+    let mut scroll = scroll::Scroll::load(renderer.columns).expect("scroll disk unreadable");
+    serial_println!("scroll restored: {} bytes", scroll.text.len());
     let mut decoder = pc_keyboard::Keyboard::new(
         pc_keyboard::ScancodeSet1::new(),
         pc_keyboard::layouts::Us104Key,
@@ -62,17 +63,17 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     );
     let mut cursor_on = true;
     let mut last_toggle = 0u64;
-    render(&mut renderer, &text, &layout, cursor_on);
+    render(&mut renderer, &scroll.text, &scroll.layout, cursor_on);
 
     loop {
         let mut dirty = false;
         while let Some(scancode) = keyboard::pop() {
+            serial_println!("sc {:#x}", scancode);
             if let Ok(Some(event)) = decoder.add_byte(scancode) {
                 if let Some(key) = decoder.process_keyevent(event) {
                     if let Some(ch) = inkable(key) {
-                        let offset = text.len();
-                        text.push(ch);
-                        layout.append(offset, ch);
+                        scroll.append_char(ch);
+                        serial_println!("ink {:?} -> {} bytes", ch, scroll.text.len());
                         dirty = true;
                     }
                 }
@@ -85,7 +86,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             dirty = true;
         }
         if dirty {
-            render(&mut renderer, &text, &layout, cursor_on);
+            render(&mut renderer, &scroll.text, &scroll.layout, cursor_on);
         }
         x86_64::instructions::hlt();
     }

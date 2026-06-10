@@ -62,6 +62,8 @@ pub fn init() {
         // Unmask only IRQ0 (timer) and IRQ1 (keyboard).
         pics.write_masks(0b1111_1100, 0b1111_1111);
     }
+    // Drain the i8042 output buffer so a stale firmware byte can't wedge IRQ1.
+    crate::keyboard::init();
     x86_64::instructions::interrupts::enable();
 }
 
@@ -73,6 +75,7 @@ extern "x86-interrupt" fn timer_handler(_frame: InterruptStackFrame) {
 extern "x86-interrupt" fn keyboard_handler(_frame: InterruptStackFrame) {
     use x86_64::instructions::port::Port;
     let scancode: u8 = unsafe { Port::new(0x60).read() };
+    serial_println!("IRQ1 sc={:#x}", scancode);
     crate::keyboard::push(scancode);
     unsafe { PICS.lock().notify_end_of_interrupt(KEYBOARD_VECTOR) };
 }
