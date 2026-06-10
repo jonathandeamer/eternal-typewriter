@@ -22,6 +22,9 @@ use bootloader_api::{
 use core::panic::PanicInfo;
 use x86_64::VirtAddr;
 
+static PANIC_FRAMEBUFFER: spin::Mutex<Option<(usize, usize, bootloader_api::info::FrameBufferInfo)>> =
+    spin::Mutex::new(None);
+
 pub static BOOTLOADER_CONFIG: BootloaderConfig = {
     let mut config = BootloaderConfig::new_default();
     config.mappings.physical_memory = Some(Mapping::Dynamic);
@@ -52,6 +55,10 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     let info = fb.info();
     serial_println!("framebuffer {}x{} {:?}", info.width, info.height, info.pixel_format);
     let mut renderer = framebuffer::Renderer::new(fb);
+    {
+        let (ptr, len, info) = renderer.raw_parts();
+        *PANIC_FRAMEBUFFER.lock() = Some((ptr as usize, len, info));
+    }
     serial_println!("grid {}x{}", renderer.columns, renderer.rows);
     interrupts::init();
 
@@ -195,6 +202,41 @@ fn render(
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
     serial_println!("PANIC: {}", info);
+    // Single-threaded kernel: if the lock is held we panicked mid-render;
+    // aliasing the buffer is fine because we never return.
+    let stashed = unsafe {
+        PANIC_FRAMEBUFFER.force_unlock();
+        *PANIC_FRAMEBUFFER.lock()
+    };
+    if let Some((ptr, len, fb_info)) = stashed {
+        let mut r = unsafe { framebuffer::Renderer::from_raw_parts(ptr as *mut u8, len, fb_info) };
+        r.fill((140, 30, 30)); // Red background
+        let mut row = 1;
+        let mut col = 0;
+        let mut put = |s: &str, row: &mut usize, col: &mut usize| {
+            for ch in s.chars() {
+                if ch == '\n' || *col >= r.columns {
+                    *row += 1;
+                    *col = 0;
+                    if ch == '\n' {
+                        continue;
+                    }
+                }
+                r.draw_char(*row, *col, ch, (250, 240, 230)); // Off-white text
+                *col += 1;
+            }
+        };
+        put("the typewriter is broken.", &mut row, &mut col);
+        row += 2;
+        col = 0;
+        let mut message = alloc::string::String::new();
+        use core::fmt::Write;
+        write!(message, "{}", info).ok();
+        put(&message, &mut row, &mut col);
+        row += 2;
+        col = 0;
+        put("your words are safe on the scroll.", &mut row, &mut col);
+    }
     loop {
         x86_64::instructions::hlt();
     }
