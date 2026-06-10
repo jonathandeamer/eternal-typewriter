@@ -11,6 +11,7 @@ mod gdt;
 mod interrupts;
 mod keyboard;
 mod memory;
+mod rtc;
 mod scroll;
 mod serial;
 
@@ -56,6 +57,26 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 
     let mut scroll = scroll::Scroll::load(renderer.columns).expect("scroll disk unreadable");
     serial_println!("scroll restored: {} bytes", scroll.text.len());
+    if let Some(date) = rtc::read_date() {
+        let mut separator = alloc::string::String::new();
+        // The marker must start its own line.
+        if !scroll.text.is_empty() && !scroll.text.ends_with('\n') {
+            separator.push('\n');
+        }
+        // Spec format: `— 10 June 2026 —`, marked in-band with 0x1E so the
+        // renderer can dim it after any future reload.
+        separator.push(scroll_core::SEPARATOR_MARKER_CHAR);
+        use core::fmt::Write;
+        write!(
+            separator,
+            "\u{2014} {} {} {} \u{2014}\n",
+            date.day,
+            rtc::month_name(date.month),
+            date.year
+        )
+        .unwrap();
+        scroll.append_str(&separator);
+    } // None: omit the separator, never block boot
     let mut decoder = pc_keyboard::Keyboard::new(
         pc_keyboard::ScancodeSet1::new(),
         pc_keyboard::layouts::Us104Key,
