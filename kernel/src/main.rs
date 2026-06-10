@@ -50,23 +50,77 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     serial_println!("framebuffer {}x{} {:?}", info.width, info.height, info.pixel_format);
     let mut renderer = framebuffer::Renderer::new(fb);
     serial_println!("grid {}x{}", renderer.columns, renderer.rows);
-    for (col, ch) in "the eternal typewriter".chars().enumerate() {
-        renderer.draw_char(0, col, ch, framebuffer::INK);
-    }
     interrupts::init();
+
+    let mut text = alloc::string::String::new();
+    let mut layout = scroll_core::layout::Layout::new(renderer.columns);
+    let mut decoder = pc_keyboard::Keyboard::new(
+        pc_keyboard::ScancodeSet1::new(),
+        pc_keyboard::layouts::Us104Key,
+        pc_keyboard::HandleControl::Ignore,
+    );
     let mut cursor_on = true;
     let mut last_toggle = 0u64;
-    renderer.draw_cursor(1, 0, cursor_on);
+    render(&mut renderer, &text, &layout, cursor_on);
+
     loop {
+        let mut dirty = false;
+        while let Some(scancode) = keyboard::pop() {
+            if let Ok(Some(event)) = decoder.add_byte(scancode) {
+                if let Some(key) = decoder.process_keyevent(event) {
+                    if let Some(ch) = inkable(key) {
+                        let offset = text.len();
+                        text.push(ch);
+                        layout.append(offset, ch);
+                        dirty = true;
+                    }
+                }
+            }
+        }
         let ticks = interrupts::TICKS.load(core::sync::atomic::Ordering::Relaxed);
         if ticks.wrapping_sub(last_toggle) >= 9 {
-            // 9 ticks at 18.2 Hz ≈ a half-second blink phase
             cursor_on = !cursor_on;
             last_toggle = ticks;
-            renderer.draw_cursor(1, 0, cursor_on);
+            dirty = true;
+        }
+        if dirty {
+            render(&mut renderer, &text, &layout, cursor_on);
         }
         x86_64::instructions::hlt();
     }
+}
+
+/// The typewriter's whole input policy: printable chars and Enter make ink;
+/// everything else (backspace, escape, control chars) does not exist.
+fn inkable(key: pc_keyboard::DecodedKey) -> Option<char> {
+    match key {
+        pc_keyboard::DecodedKey::Unicode('\n') | pc_keyboard::DecodedKey::Unicode('\r') => {
+            Some('\n')
+        }
+        pc_keyboard::DecodedKey::Unicode(ch) if !ch.is_control() => Some(ch),
+        _ => None,
+    }
+}
+
+/// Draw the last `rows` lines of the scroll (the page scrolls upward like
+/// paper feeding) plus the cursor at the live end.
+fn render(
+    renderer: &mut framebuffer::Renderer,
+    text: &str,
+    layout: &scroll_core::layout::Layout,
+    cursor_on: bool,
+) {
+    renderer.fill(framebuffer::PAPER);
+    let lines = layout.lines();
+    let first = lines.len().saturating_sub(renderer.rows);
+    for (row, line) in lines[first..].iter().enumerate() {
+        let color = if line.is_separator { framebuffer::DIM } else { framebuffer::INK };
+        for (col, ch) in text[line.start..line.end].chars().enumerate() {
+            renderer.draw_char(row, col, ch, color);
+        }
+    }
+    let (cursor_line, cursor_col) = layout.cursor();
+    renderer.draw_cursor(cursor_line - first, cursor_col, cursor_on);
 }
 
 #[panic_handler]

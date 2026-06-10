@@ -8,6 +8,7 @@ bootloader_api = "0.11"
 x86_64 = "0.15"
 pic8259 = "0.11"
 linked_list_allocator = "0.10"
+pc-keyboard = "0.7"
 spin = "0.9"
 uart_16550 = "0.3"
 # 0.3.x has no unicode-general-punctuation range, so the em dash (U+2014)
