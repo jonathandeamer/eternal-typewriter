@@ -213,6 +213,7 @@ fn render(
     if scroll::WRITE_TROUBLE.load(core::sync::atomic::Ordering::Relaxed) {
         renderer.draw_warning_glyph();
     }
+    renderer.present();
 }
 
 #[panic_handler]

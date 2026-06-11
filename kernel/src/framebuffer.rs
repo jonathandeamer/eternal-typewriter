@@ -23,6 +23,10 @@ fn raster(ch: char) -> RasterizedChar {
 
 pub struct Renderer {
     buffer: &'static mut [u8],
+    // Off-screen buffer drawn into by every put_pixel; copied to `buffer` in
+    // one pass by present(). `None` on the panic path, which writes through
+    // directly (the heap may be unusable after a panic).
+    back: Option<alloc::vec::Vec<u8>>,
     info: FrameBufferInfo,
     glyph_width: usize,
     line_height: usize,
@@ -39,8 +43,11 @@ impl Renderer {
         let line_height = HEIGHT.val();
         let columns = (info.width - 2 * MARGIN) / glyph_width;
         let rows = (info.height - 2 * MARGIN) / line_height;
+        let buffer = framebuffer.buffer_mut();
+        let back = Some(alloc::vec![0u8; buffer.len()]);
         let mut renderer = Renderer {
-            buffer: framebuffer.buffer_mut(),
+            buffer,
+            back,
             info,
             glyph_width,
             line_height,
@@ -48,6 +55,7 @@ impl Renderer {
             rows,
         };
         renderer.fill(PAPER);
+        renderer.present();
         renderer
     }
 
@@ -62,16 +70,23 @@ impl Renderer {
         let line_height = HEIGHT.val();
         let columns = (info.width - 2 * MARGIN) / glyph_width;
         let rows = (info.height - 2 * MARGIN) / line_height;
-        Renderer { buffer, info, glyph_width, line_height, columns, rows }
+        // Panic path: write straight to the framebuffer, no back buffer.
+        Renderer { buffer, back: None, info, glyph_width, line_height, columns, rows }
     }
 
     fn put_pixel(&mut self, x: usize, y: usize, (r, g, b): Rgb) {
         if x >= self.info.width || y >= self.info.height {
             return;
         }
-        let offset = (y * self.info.stride + x) * self.info.bytes_per_pixel;
-        let pixel = &mut self.buffer[offset..offset + self.info.bytes_per_pixel];
-        match self.info.pixel_format {
+        let bpp = self.info.bytes_per_pixel;
+        let offset = (y * self.info.stride + x) * bpp;
+        let format = self.info.pixel_format;
+        let target: &mut [u8] = match self.back {
+            Some(ref mut b) => b,
+            None => self.buffer,
+        };
+        let pixel = &mut target[offset..offset + bpp];
+        match format {
             PixelFormat::Rgb => {
                 pixel[0] = r;
                 pixel[1] = g;
@@ -86,6 +101,14 @@ impl Renderer {
                 let grey = ((r as u16 + g as u16 + b as u16) / 3) as u8;
                 pixel[0] = grey;
             }
+        }
+    }
+
+    /// Copy the off-screen buffer to the live framebuffer in one pass, so the
+    /// display never shows a half-drawn frame. No-op on the panic path.
+    pub fn present(&mut self) {
+        if let Some(ref back) = self.back {
+            self.buffer.copy_from_slice(back);
         }
     }
 
