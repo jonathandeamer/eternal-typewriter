@@ -5,7 +5,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 IMG=$(cargo run --quiet -- --print-bios-image)
-MON=$(mktemp -u /tmp/etyp-monitor.XXXXXX.sock)
+# X's must be trailing for BSD/macOS mktemp; the .sock suffix made it fail.
+MON=$(mktemp -u /tmp/etyp-monitor.sock.XXXXXX)
 SCROLL=e2e-scroll.img
 
 cleanup() {

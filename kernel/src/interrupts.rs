@@ -75,7 +75,6 @@ extern "x86-interrupt" fn timer_handler(_frame: InterruptStackFrame) {
 extern "x86-interrupt" fn keyboard_handler(_frame: InterruptStackFrame) {
     use x86_64::instructions::port::Port;
     let scancode: u8 = unsafe { Port::new(0x60).read() };
-    serial_println!("IRQ1 sc={:#x}", scancode);
     crate::keyboard::push(scancode);
     unsafe { PICS.lock().notify_end_of_interrupt(KEYBOARD_VECTOR) };
 }

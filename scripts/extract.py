@@ -20,13 +20,15 @@ def payloads(path):
             (seq,) = struct.unpack_from("<Q", sector, 4)
             (length,) = struct.unpack_from("<H", sector, 12)
             (crc,) = struct.unpack_from("<I", sector, 14)
-            if seq != lba:
-                raise ValueError(f"Sequence number mismatch: sector at LBA {lba} has seq {seq}")
-            if length > PAYLOAD_CAPACITY:
-                raise ValueError(f"Length field too large: {length} > {PAYLOAD_CAPACITY}")
+            # An invalid record marks the end of the valid prefix — exactly
+            # how the kernel's record::decode treats it. A torn tail sector
+            # (bad CRC after power loss) must end the stream gracefully, not
+            # discard all the good prose written before it.
+            if seq != lba or length > PAYLOAD_CAPACITY:
+                return
             payload = sector[18 : 18 + length]
             if zlib.crc32(payload) & 0xFFFFFFFF != crc:
-                raise ValueError(f"CRC-32 checksum mismatch at LBA {lba}")
+                return
             yield payload
             lba += 1
 

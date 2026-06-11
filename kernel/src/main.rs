@@ -44,13 +44,6 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     let mut frame_allocator =
         unsafe { memory::BootInfoFrameAllocator::init(&boot_info.memory_regions) };
     allocator::init_heap(&mut mapper, &mut frame_allocator).expect("heap init failed");
-    {
-        let mut probe = alloc::vec::Vec::new();
-        for i in 0..100_000u64 {
-            probe.push(i);
-        }
-        serial_println!("heap ok: vec of {} elements", probe.len());
-    }
     let fb = boot_info.framebuffer.as_mut().expect("no framebuffer");
     let info = fb.info();
     serial_println!("framebuffer {}x{} {:?}", info.width, info.height, info.pixel_format);
@@ -97,7 +90,6 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     loop {
         let mut dirty = false;
         while let Some(scancode) = keyboard::pop() {
-            serial_println!("sc {:#x}", scancode);
             if let Ok(Some(event)) = decoder.add_byte(scancode) {
                 if let Some(key) = decoder.process_keyevent(event) {
                     match key {
@@ -123,7 +115,6 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                                 // end AND inks there — even mid-reading.
                                 view_offset = 0;
                                 scroll.append_char(ch);
-                                serial_println!("ink {:?} -> {} bytes", ch, scroll.text.len());
                                 dirty = true;
                             }
                         }
