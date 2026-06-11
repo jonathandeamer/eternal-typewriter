@@ -144,7 +144,19 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         if dirty {
             render(&mut renderer, &scroll.text, &scroll.layout, cursor_on, view_offset, scroll.full);
         }
-        x86_64::instructions::hlt();
+        if scroll.fully_loaded() {
+            // Idle: sleep until the next interrupt (keystroke or blink tick).
+            x86_64::instructions::hlt();
+        } else {
+            // Stream history in behind the live page as fast as the disk
+            // allows — don't hlt(), or the timer would throttle the load to
+            // ~18 Hz and a grown scroll would take a minute. Keystrokes are
+            // still serviced each pass at the top of the loop.
+            if scroll.pump(renderer.columns).unwrap_or(false) {
+                serial_println!("scroll fully loaded: {} bytes", scroll.text.len());
+                render(&mut renderer, &scroll.text, &scroll.layout, cursor_on, view_offset, scroll.full);
+            }
+        }
     }
 }
 

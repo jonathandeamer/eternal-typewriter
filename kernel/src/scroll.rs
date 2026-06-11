@@ -15,12 +15,27 @@ pub struct Scroll {
     tail: Vec<u8>,  // bytes in the one rewritable tail sector (< 494)
     total_sectors: u64,
     pub full: bool,
+    /// Sealed sectors [0, end) not yet in RAM, streamed oldest-first by the
+    /// idle loop. None = fully loaded.
+    pending: Option<Loader>,
 }
 
+pub struct Loader {
+    prefix: Vec<u8>, // payloads of sectors [0, cursor) — oldest prose
+    cursor: u64,     // next LBA to read
+    end: u64,        // first LBA already in RAM
+}
+
+/// ~31 KB ≈ a dozen screenfuls: enough to fill the page instantly at boot
+/// while the rest of a grown scroll streams in behind the cursor.
+const TAIL_SECTORS: u64 = 64;
+
 impl Scroll {
-    /// Boot: binary-search the highest valid record, then load everything.
-    /// Valid records form a contiguous prefix from LBA 0 (zeroed-disk
-    /// precondition + LBA check), which is what makes the search sound.
+    /// Boot: binary-search the highest valid record, then load only the last
+    /// `TAIL_SECTORS` before returning so the cursor appears in well under a
+    /// second even on a grown scroll. The older history streams in afterwards
+    /// via `pump`. Valid records form a contiguous prefix from LBA 0 (zeroed-
+    /// disk precondition + LBA check), which is what makes the search sound.
     pub fn load(columns: usize) -> Result<Scroll, AtaError> {
         let total_sectors = u32::try_from(ata::identify().ok_or(AtaError)?).map_err(|_| AtaError)? as u64;
         let mut sector = [0u8; SECTOR_SIZE];
@@ -37,10 +52,11 @@ impl Scroll {
             }
         }
         let valid = lo;
+        let first_loaded = valid.saturating_sub(TAIL_SECTORS);
 
         let mut bytes: Vec<u8> = Vec::new();
         let mut last_len = 0usize;
-        for lba in 0..valid {
+        for lba in first_loaded..valid {
             ata::read_sector(lba as u32, &mut sector)?;
             let payload = record::decode(&sector, lba).ok_or(AtaError)?;
             last_len = payload.len();
@@ -60,7 +76,47 @@ impl Scroll {
         let text = String::from_utf8_lossy(&bytes).into_owned();
         let layout = Layout::from_text(&text, columns);
         let full = sealed == total_sectors;
-        Ok(Scroll { text, layout, sealed, tail, total_sectors, full })
+        let pending = (first_loaded > 0).then(|| Loader {
+            prefix: Vec::new(),
+            cursor: 0,
+            end: first_loaded,
+        });
+        Ok(Scroll { text, layout, sealed, tail, total_sectors, full, pending })
+    }
+
+    pub fn fully_loaded(&self) -> bool {
+        self.pending.is_none()
+    }
+
+    /// Stream one chunk of history from disk. Call from the idle loop; returns
+    /// true when the stream just finished (layout was rebuilt — re-render).
+    /// Reads up to `CHUNK` sectors per ATA command so a grown scroll loads at
+    /// PIO bandwidth rather than one slow command per sector.
+    pub fn pump(&mut self, columns: usize) -> Result<bool, AtaError> {
+        const CHUNK: u64 = 256; // max sectors per READ SECTORS command
+        let Some(loader) = &mut self.pending else { return Ok(false) };
+        let count = (loader.end - loader.cursor).min(CHUNK);
+        let mut batch = alloc::vec![0u8; count as usize * SECTOR_SIZE];
+        ata::read_sectors(loader.cursor as u32, count as u16, &mut batch)?;
+        for i in 0..count {
+            let lba = loader.cursor + i;
+            let start = i as usize * SECTOR_SIZE;
+            let sector: &[u8; SECTOR_SIZE] =
+                batch[start..start + SECTOR_SIZE].try_into().unwrap();
+            let payload = record::decode(sector, lba).ok_or(AtaError)?;
+            loader.prefix.extend_from_slice(payload);
+        }
+        loader.cursor += count;
+        if loader.cursor < loader.end {
+            return Ok(false);
+        }
+        // Done: splice history before the live tail, rebuild layout once.
+        let loader = self.pending.take().unwrap();
+        let mut all = loader.prefix;
+        all.extend_from_slice(self.text.as_bytes());
+        self.text = String::from_utf8_lossy(&all).into_owned();
+        self.layout = Layout::from_text(&self.text, columns);
+        Ok(true)
     }
 
     pub fn append_char(&mut self, ch: char) {
