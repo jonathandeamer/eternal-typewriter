@@ -109,6 +109,17 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
                                 dirty = true;
                             }
                         }
+                        pc_keyboard::DecodedKey::RawKey(pc_keyboard::KeyCode::F12) => {
+                            serial_println!("=== SCROLL BEGIN ===");
+                            // Strip in-band separator markers, same as extract.py.
+                            for ch in scroll.text.chars() {
+                                if ch != scroll_core::SEPARATOR_MARKER_CHAR {
+                                    serial_print!("{}", ch);
+                                }
+                            }
+                            serial_println!();
+                            serial_println!("=== SCROLL END ===");
+                        }
                         other => {
                             if let Some(ch) = inkable(other) {
                                 // Spec: a printable key snaps back to the live
