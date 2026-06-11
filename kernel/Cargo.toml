@@ -1,0 +1,22 @@
+[package]
+name = "kernel"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bootloader_api = "0.11"
+x86_64 = "0.15"
+pic8259 = "0.11"
+linked_list_allocator = "0.10"
+pc-keyboard = "0.7"
+spin = "0.9"
+uart_16550 = "0.3"
+# 0.3.x has no unicode-general-punctuation range, so the em dash (U+2014)
+# falls back to '-' on screen via draw_char; the real bytes still persist.
+noto-sans-mono-bitmap = { version = "0.3", default-features = false, features = [
+    "bold",
+    "size_24",
+    "unicode-basic-latin",
+    "unicode-latin-1-supplement",
+] }
+scroll-core = { path = "../scroll-core" }

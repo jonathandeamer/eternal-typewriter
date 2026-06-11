@@ -1,0 +1,11 @@
+[package]
+name = "eternal-typewriter"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+members = ["kernel", "scroll-core"]
+
+[build-dependencies]
+bootloader = "0.11"
+kernel = { path = "kernel", artifact = "bin", target = "x86_64-unknown-none" }
