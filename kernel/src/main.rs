@@ -58,9 +58,13 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     serial_println!("scroll restored: {} bytes", scroll.text.len());
     if let Some(date) = rtc::read_date() {
         let mut separator = alloc::string::String::new();
-        // The marker must start its own line.
-        if !scroll.text.is_empty() && !scroll.text.ends_with('\n') {
-            separator.push('\n');
+        // Set the header off with a blank line above it — but never lead a
+        // fresh scroll with blank space.
+        if !scroll.text.is_empty() {
+            if !scroll.text.ends_with('\n') {
+                separator.push('\n'); // close the current line first
+            }
+            separator.push('\n'); // the blank line above the header
         }
         // Spec format: `— 10 June 2026, 14:32 —`, marked in-band with 0x1E so the
         // renderer can dim it after any future reload. Time is a snapshot of the
