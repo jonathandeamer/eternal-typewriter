@@ -28,8 +28,7 @@ static PANIC_FRAMEBUFFER: spin::Mutex<Option<(usize, usize, bootloader_api::info
 pub static BOOTLOADER_CONFIG: BootloaderConfig = {
     let mut config = BootloaderConfig::new_default();
     config.mappings.physical_memory = Some(Mapping::Dynamic);
-    config.frame_buffer.minimum_framebuffer_width = Some(1024);
-    config.frame_buffer.minimum_framebuffer_height = Some(768);
+    // Framebuffer minimum size now lives in BootConfig (set in build.rs).
     config
 };
 
