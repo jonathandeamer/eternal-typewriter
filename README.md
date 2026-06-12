@@ -13,7 +13,11 @@ sessions. Verified in QEMU; it has not been run on real hardware yet.
 
 ## Running it
 
-You need [rustup](https://rustup.rs) and QEMU. The nightly toolchain, the
+If you just want to try it, there are prebuilt bootable images on the
+[releases page](https://github.com/jonathandeamer/eternal-typewriter/releases),
+with instructions. No Rust toolchain needed.
+
+To build from source you need [rustup](https://rustup.rs) and QEMU. The nightly toolchain, the
 `x86_64-unknown-none` target, and the components it needs install themselves from
 `rust-toolchain.toml` the first time you build, so the only things to install by
 hand are QEMU (`brew install qemu`, or your system's package manager) and, for
